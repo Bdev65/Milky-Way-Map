@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Wayfinder — an explorable map of the solar system</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #04060c;
+    --text: #e9edf6;
+    --text-dim: #8891a7;
+    --line: #2c3346;
+    --panel: rgba(10,13,22,0.86);
+    --panel-border: rgba(255,255,255,0.08);
+    --gold: #f2c14e;
+    --leader: rgba(255,255,255,0.28);
+  }
+  *{ box-sizing: border-box; }
+  html,body{
+    margin:0; padding:0; width:100%; height:100%; overflow:hidden;
+    background: var(--bg); color: var(--text);
+    font-family: 'Inter', sans-serif;
+    -webkit-user-select:none; user-select:none;
+  }
+  #app{ position:fixed; inset:0; }
+  svg#stage{ width:100%; height:100%; display:block; cursor:grab; touch-action:none; }
+  svg#stage.dragging{ cursor:grabbing; }
+
+  .obj-label{ font-family:'Inter',sans-serif; font-size: 12px; fill: var(--text); pointer-events:none; }
+  .obj-label.type-star{ font-family:'Space Grotesk', sans-serif; font-weight:600; }
+  .leader{ stroke: var(--leader); stroke-width:1; fill:none; }
+  .orbit{ fill:none; stroke: var(--line); stroke-width:1; }
+  .marker{ cursor:pointer; }
+  .marker.selected{ stroke:#fff; stroke-width:2; }
+  .dust{ pointer-events:none; }
+  .fade{ transition: opacity 0.35s ease; }
+
+  header{ position:absolute; top:0; left:0; right:0; display:flex; align-items:flex-start; justify-content:space-between; padding: 16px 18px; pointer-events:none; z-index:5; }
+  header .brand{ pointer-events:auto; }
+  header h1{ font-family:'Space Grotesk', sans-serif; font-size: 17px; font-weight:600; margin:0; letter-spacing:0.01em; }
+  header .brand p{ margin:2px 0 0; font-size:11.5px; color:var(--text-dim); max-width:230px; }
+
+  #searchWrap{ pointer-events:auto; display:flex; flex-direction:column; gap:6px; align-items:flex-end; z-index:12; }
+  .searchRow, .layersRow{ position:relative; width:min(46vw,280px); }
+  #layersBtn{ width:100%; background:var(--panel); border:1px solid var(--panel-border); border-radius:9px; padding:7px 10px; color:var(--text-dim); font-size:11.5px; font-family:'Inter',sans-serif; cursor:pointer; backdrop-filter: blur(10px); display:flex; align-items:center; justify-content:space-between; gap:5px; }
+  #layersBtn:hover{ color:var(--text); }
+  #layersBtn .car{ font-size:9px; transition: transform 0.15s ease; }
+  #layersBtn.open .car{ transform:rotate(180deg); }
+  #layersMenu{ position:absolute; top:calc(100% + 6px); right:0; left:0; background:var(--panel); border:1px solid var(--panel-border); border-radius:12px; padding:8px; backdrop-filter: blur(10px); display:none; z-index:12; }
+  .lg-item{ display:flex; align-items:center; gap:8px; padding:6px 6px; border-radius:7px; cursor:pointer; font-size:12.5px; color:var(--text-dim); }
+  .lg-item:hover{ background:rgba(255,255,255,0.06); }
+  .lg-item .chk{ width:13px; height:13px; border-radius:4px; border:1.5px solid rgba(255,255,255,0.3); flex-shrink:0; position:relative; }
+  .lg-item.on{ color:var(--text); }
+  .lg-item.on .chk{ background:var(--gold); border-color:var(--gold); }
+  .lg-item.on .chk::after{ content:''; position:absolute; left:3.5px; top:1px; width:4px; height:7px; border:solid #04060c; border-width:0 2px 2px 0; transform:rotate(40deg); }
+  .lg-item .swatch{ width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+  .lg-hint{ font-size:9.5px; color:var(--text-dim); padding:6px 6px 0; line-height:1.4; }
+  #search{ width:100%; background:var(--panel); border:1px solid var(--panel-border); border-radius: 10px; padding:9px 12px; color:var(--text); font-size:13px; font-family:'Inter',sans-serif; backdrop-filter: blur(10px); outline:none; }
+  #search::placeholder{ color:var(--text-dim); }
+  #searchResults{ position:absolute; top:calc(100% + 6px); left:0; right:0; background:var(--panel); border:1px solid var(--panel-border); border-radius:10px; backdrop-filter: blur(10px); max-height: 260px; overflow-y:auto; display:none; z-index:12; }
+  #searchResults div{ padding:8px 12px; font-size:13px; cursor:pointer; border-bottom:1px solid rgba(255,255,255,0.04); }
+  #searchResults div:last-child{ border-bottom:none; }
+  #searchResults div:hover{ background: rgba(255,255,255,0.06); }
+  #searchResults span{ color:var(--text-dim); font-size:11px; margin-left:6px; }
+
+  #bottomLeft{ position:absolute; bottom:16px; left:14px; z-index:5; display:flex; flex-direction:column; gap:8px; pointer-events:auto; }
+  #rotatePad{ width:64px; height:64px; border-radius:50%; background:var(--panel); border:1px solid var(--panel-border); backdrop-filter: blur(10px); position:relative; cursor: grab; touch-action:none; overflow:hidden; }
+  #rotatePad svg{ display:block; }
+  #rotatePad .lbl{ position:absolute; bottom:-16px; left:0; right:0; text-align:center; font-size:9px; color:var(--text-dim); }
+  #gizPlane{ fill:none; stroke:rgba(255,255,255,0.32); stroke-width:1.2; }
+  #gizAxis{ stroke:rgba(242,193,78,0.55); stroke-width:1.2; }
+  #gizNorth{ fill:var(--gold); }
+  #gizNorthLbl{ fill:var(--gold); font-size:7px; font-family:'Space Grotesk',sans-serif; text-anchor:middle; }
+  #gizRef{ fill:#7fc8e0; }
+  #zoomRow{ display:flex; gap:6px; }
+  #zoomRow button, #resetBtn{ width:30px; height:30px; border-radius:8px; border:1px solid var(--panel-border); background:var(--panel); color:var(--text); font-size:15px; cursor:pointer; backdrop-filter: blur(10px); font-family:'Space Grotesk',sans-serif; }
+  #zoomRow button:hover, #resetBtn:hover{ background:rgba(255,255,255,0.1); }
+  #scaleWrap{ background:var(--panel); border:1px solid var(--panel-border); border-radius:10px; padding:7px 11px; backdrop-filter: blur(10px); font-size:10.5px; color:var(--text-dim); min-width:150px; }
+  #scaleWrap .bar{ height:2px; background:var(--text-dim); margin-top:5px; position:relative; }
+  #scaleWrap .bar::before, #scaleWrap .bar::after{ content:''; position:absolute; top:-3px; width:1px; height:8px; background:var(--text-dim); }
+  #scaleWrap .bar::before{ left:0; } #scaleWrap .bar::after{ right:0; }
+
+  #infoPanel{ position:absolute; right:14px; bottom:16px; z-index:6; width:min(88vw, 320px); max-height:64vh; overflow-y:auto; background:var(--panel); border:1px solid var(--panel-border); border-radius:14px; padding:16px; backdrop-filter: blur(14px); transform: translateY(12px); opacity:0; pointer-events:none; transition: transform 0.22s ease, opacity 0.22s ease; }
+  #infoPanel.open{ transform:translateY(0); opacity:1; pointer-events:auto; }
+  #infoPanel .close{ position:absolute; top:10px; right:12px; cursor:pointer; color:var(--text-dim); font-size:18px; line-height:1; background:none; border:none; }
+  #infoPanel h2{ font-family:'Space Grotesk',sans-serif; font-size:19px; margin:0 0 2px; padding-right:20px; }
+  #infoPanel .kind{ font-size:11.5px; color:var(--text-dim); margin-bottom:10px; }
+  #infoPanel table{ width:100%; border-collapse:collapse; margin-bottom:10px; }
+  #infoPanel td{ font-size:12.5px; padding:4px 0; border-top:1px solid rgba(255,255,255,0.06); }
+  #infoPanel td:first-child{ color:var(--text-dim); width:46%; }
+  #infoPanel .blurb{ font-size:13px; line-height:1.5; color:#d7dcea; }
+
+  #aboutBtn{ position:absolute; top:16px; left:50%; transform:translateX(-50%); z-index:4; pointer-events:auto; background:var(--panel); border:1px solid var(--panel-border); color:var(--text-dim); font-size:11.5px; padding:6px 12px; border-radius:20px; cursor:pointer; backdrop-filter: blur(10px); display:none; }
+  @media (min-width: 760px){ #aboutBtn{ display:block; } }
+  #aboutPanel{ position:absolute; top:64px; left:50%; transform:translateX(-50%); z-index:7; width:min(90vw,400px); background:var(--panel); border:1px solid var(--panel-border); border-radius:14px; padding:16px 18px; backdrop-filter: blur(14px); display:none; font-size:12.5px; line-height:1.55; color:#d7dcea; pointer-events:auto; max-height:70vh; overflow-y:auto; }
+  #aboutPanel h3{ font-family:'Space Grotesk',sans-serif; font-size:14px; margin:14px 0 6px; }
+  #aboutPanel h3:first-child{ margin-top:0; }
+  #aboutPanel .close{ position:absolute; top:8px; right:12px; cursor:pointer; color:var(--text-dim); background:none; border:none; font-size:18px; }
+
+  ::-webkit-scrollbar{ width:6px; }
+  ::-webkit-scrollbar-thumb{ background:rgba(255,255,255,0.15); border-radius:3px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <svg id="stage" viewBox="0 0 1000 1000">
+    <defs>
+      <radialGradient id="sunGlow" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#fff3c4" stop-opacity="0.9"/>
+        <stop offset="35%" stop-color="#f2c14e" stop-opacity="0.35"/>
+        <stop offset="100%" stop-color="#f2c14e" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+    <g id="world">
+      <g id="starfield"></g>
+      <circle cx="0" cy="0" r="170" fill="url(#sunGlow)"></circle>
+      <g id="orbits"></g>
+      <g id="oortDots" class="dust fade"></g>
+      <g id="beltDots" class="dust fade"></g>
+      <g id="objects"></g>
+    </g>
+  </svg>
+
+  <header>
+    <div class="brand">
+      <h1>Wayfinder</h1>
+      <p>a scale map of the solar system — and the stars just past it</p>
+    </div>
+    <div id="searchWrap">
+      <div class="searchRow">
+        <input id="search" placeholder="Find a planet, moon, star…" autocomplete="off">
+        <div id="searchResults"></div>
+      </div>
+      <div class="layersRow">
+        <button id="layersBtn">Layers <span class="car">▾</span></button>
+        <div id="layersMenu">
+          <div class="lg-item" data-layer="planet"><span class="chk"></span><span class="swatch" style="background:#6fa3e0"></span>Planets</div>
+          <div class="lg-item" data-layer="dwarf"><span class="chk"></span><span class="swatch" style="background:#a98cd9"></span>Dwarf planets</div>
+          <div class="lg-item" data-layer="moon"><span class="chk"></span><span class="swatch" style="background:#9aa4bb"></span>Moons</div>
+          <div class="lg-item" data-layer="asteroid"><span class="chk"></span><span class="swatch" style="background:#c2a878"></span>Named asteroids</div>
+          <div class="lg-item" data-layer="comet"><span class="chk"></span><span class="swatch" style="background:#bfe3e8"></span>Comets</div>
+          <div class="lg-item" data-layer="belt"><span class="chk"></span><span class="swatch" style="background:#5a6178"></span>Dust belts</div>
+          <div class="lg-item" data-layer="star"><span class="chk"></span><span class="swatch" style="background:#f2c14e"></span>Nearby stars + Oort Cloud</div>
+          <div class="lg-hint">Detail also thins automatically as you zoom out.</div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <button id="aboutBtn">how to read this map</button>
+  <div id="aboutPanel">
+    <button class="close" id="aboutClose">×</button>
+    <h3>Distance</h3>
+    <p>The solar system spans a distance so vast that a straight-line map would make the inner planets invisible. Distances from the Sun use a logarithmic scale, so every ring further out represents a much bigger real jump than the one before it. The scale bar (bottom left) shows the true local scale near the center of your current view — it stretches out again as you look further from the Sun, since that's the nature of a compressed map.</p>
+    <h3>Size</h3>
+    <p>No single map can show true sizes and true distances together — Earth would be a pixel a football field away from a beach-ball Sun. Marker sizes are scaled to each other by real diameter, on their own separate scale from distance.</p>
+    <h3>Tilt &amp; rotation</h3>
+    <p>Drag the small dial (bottom left) to rotate and tilt your view in 3D — or, with a touchscreen, use two fingers: pinch to zoom, twist to spin around the Sun, and drag two fingers up/down to tilt. One finger always pans. Planets, dwarf planets, comets and named asteroids are tilted by their <em>real</em> orbital inclination — that's why Pluto and especially Eris and comet Halley swing so far off the flat plane when you tilt the camera. Moon and star tilts are simplified for visual variety, not precise.</p>
+    <h3>Focus</h3>
+    <p>Selecting a body makes it the pivot for rotating and the anchor for zooming — the camera orbits around whatever you last selected, keeping it centered no matter how you spin the view. With nothing selected, that's the Sun.</p>
+    <h3>Position</h3>
+    <p>Except for inclination, angles are illustrative — spread out for readability, not where each body actually sits on a given date. For the nearby-star layer, distances from the Sun are real; directions are arbitrary.</p>
+    <h3>Zooming out</h3>
+    <p>As you zoom out, detail thins automatically: moons drop away first, then planets, dwarf planets, comets, asteroids and the dust belts, leaving the Sun and — once you're far enough out to reach real interstellar distances — the Oort Cloud and nearby stars.</p>
+  </div>
+
+
+  <div id="infoPanel">
+    <button class="close" id="infoClose">×</button>
+    <div id="infoBody"></div>
+  </div>
+
+  <div id="bottomLeft">
+    <div id="rotatePad" title="Drag to rotate & tilt">
+      <svg viewBox="0 0 64 64" width="64" height="64">
+        <ellipse id="gizPlane" cx="32" cy="32" rx="22" ry="22"></ellipse>
+        <line id="gizAxis" x1="32" y1="32" x2="32" y2="32"></line>
+        <circle id="gizRef" cx="54" cy="32" r="2.4"></circle>
+        <circle id="gizNorth" cx="32" cy="10" r="2.6"></circle>
+        <text id="gizNorthLbl" x="32" y="6">N</text>
+      </svg>
+      <div class="lbl">tilt</div>
+    </div>
+    <div id="zoomRow">
+      <button id="zoomIn">+</button>
+      <button id="zoomOut">−</button>
+      <button id="resetBtn" title="Reset view">⟳</button>
+    </div>
+    <div id="scaleWrap">
+      <div id="scaleLabel">scale</div>
+      <div class="bar"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================= DATA ============================= */
+// Distances: AU from the Sun (semi-major axis). Radii: km. Orbital periods: Earth years.
+// Inclinations: degrees relative to the ecliptic — real values, used to tilt objects in 3D.
+const AU_TO_LY = 1/63241;
+const AU_KM = 149597870;
+
+const PLANETS = [
+  { id:'mercury', name:'Mercury', au:0.39, radiusKm:2440, color:'#9c9c94', period:0.24, incl:7.0, moons:0, blurb:'The smallest and innermost planet. A year on Mercury is just 88 Earth days, but a single day-night cycle lasts about 176 Earth days.' },
+  { id:'venus', name:'Venus', au:0.72, radiusKm:6052, color:'#e8cda2', period:0.62, incl:3.4, moons:0, blurb:'The hottest planet, thanks to a runaway greenhouse effect — surface temperatures reach about 465°C, hot enough to melt lead.' },
+  { id:'earth', name:'Earth', au:1.00, radiusKm:6371, color:'#4d7fc4', period:1.00, incl:0.0, moons:1, blurb:'The only known planet with life. About 71% of its surface is covered by liquid water.' },
+  { id:'mars', name:'Mars', au:1.52, radiusKm:3390, color:'#c1552c', period:1.88, incl:1.85, moons:2, blurb:'Home to Olympus Mons, the tallest volcano in the Solar System — nearly three times the height of Mount Everest.' },
+  { id:'jupiter', name:'Jupiter', au:5.20, radiusKm:69911, color:'#d8ac6c', period:11.86, incl:1.3, moons:95, blurb:'The largest planet — more massive than all other planets combined. Its Great Red Spot is a storm wider than Earth that has raged for centuries.' },
+  { id:'saturn', name:'Saturn', au:9.58, radiusKm:58232, color:'#e0c887', period:29.45, incl:2.5, moons:146, ring:true, blurb:'Famous for its bright ring system made mostly of ice particles. Saturn is the least dense planet — it would float in water.' },
+  { id:'uranus', name:'Uranus', au:19.20, radiusKm:25362, color:'#9fd9e6', period:83.75, incl:0.77, moons:28, blurb:'Rotates on its side, at roughly 98° — likely the result of an ancient collision. Its blue-green color comes from methane in the atmosphere.' },
+  { id:'neptune', name:'Neptune', au:30.10, radiusKm:24622, color:'#4166f5', period:163.7, incl:1.77, moons:16, blurb:'The windiest planet, with storms clocked over 2,000 km/h. It was the first planet located by mathematical prediction rather than direct observation.' },
+];
+
+const DWARF_PLANETS = [
+  { id:'ceres', name:'Ceres', au:2.77, radiusKm:469, color:'#a98cd9', period:4.6, incl:10.6, blurb:'The largest object in the asteroid belt, and the only dwarf planet in the inner Solar System.' },
+  { id:'pluto', name:'Pluto', au:39.5, radiusKm:1188, color:'#c9a9d9', period:248, incl:17.2, blurb:'Reclassified as a dwarf planet in 2006. It has a heart-shaped glacier of nitrogen ice called Tombaugh Regio. Its steep tilt is real — drag the tilt dial to see it lift off the plane.' },
+  { id:'haumea', name:'Haumea', au:43.1, radiusKm:620, color:'#a98cd9', period:284, incl:28.2, blurb:'Spins so fast — once every 4 hours — that it\u2019s stretched into an elongated, egg-like shape.' },
+  { id:'makemake', name:'Makemake', au:45.8, radiusKm:715, color:'#b699db', period:305, incl:29.0, blurb:'Named after a creator deity of the Rapa Nui people of Easter Island.' },
+  { id:'eris', name:'Eris', au:68.0, radiusKm:1163, color:'#a98cd9', period:559, incl:44.0, blurb:'One of the most massive known dwarf planets, on one of the most steeply tilted orbits of any large body — 44° off the plane the planets roughly share. Tilt the view to see just how far it strays.' },
+];
+
+const ASTEROIDS = [
+  { id:'vesta', name:'Vesta', au:2.36, radiusKm:263, incl:7.1, blurb:'The second-most massive object in the asteroid belt, and bright enough to be seen with the naked eye from Earth on a dark night.' },
+  { id:'pallas', name:'Pallas', au:2.77, radiusKm:256, incl:34.8, blurb:'One of the largest asteroids, on a surprisingly steep, tilted orbit for a belt object — over 34° from the plane most planets share.' },
+  { id:'hygiea', name:'Hygiea', au:3.14, radiusKm:217, incl:3.8, blurb:'The fourth-largest asteroid, round enough that some researchers argue it could qualify as a dwarf planet.' },
+  { id:'eros', name:'Eros', au:1.46, radiusKm:8.4, incl:10.8, blurb:'A near-Earth asteroid shaped like a stretched-out potato — the first asteroid ever orbited and landed on by a spacecraft, NASA\u2019s NEAR Shoemaker in 2000-2001.' },
+];
+
+const COMETS = [
+  { id:'halley', name:'Halley\u2019s Comet', au:17.8, incl:162.3, period:'76 years', blurb:'The most famous comet, last seen from Earth in 1986 and due back around 2061. Its orbit is retrograde — it loops the Sun backwards compared to the planets, tilted more than 162°. Shown here at its average distance; it actually swings from just 0.6 AU to 35 AU from the Sun.' },
+  { id:'encke', name:'Encke\u2019s Comet', au:2.22, incl:11.8, period:'3.3 years', blurb:'One of the shortest-period comets known, completing an orbit in just over 3 years — it has been observed more times than any other comet.' },
+  { id:'halebopp', name:'Hale-Bopp', au:186, incl:89.4, period:'~2,533 years', blurb:'One of the brightest comets of the 20th century, visible to the naked eye for a record 18 months in 1996-97. Its orbit is tilted almost exactly 90° to the planets.' },
+  { id:'hyakutake', name:'Hyakutake', au:1000, incl:124.9, period:'tens of thousands of years (uncertain)', blurb:'A "Great Comet" of 1996 that passed unusually close to Earth. Jupiter\u2019s gravity has repeatedly reshaped its orbit, so its exact period is uncertain — shown here only approximately.' },
+  { id:'neowise', name:'NEOWISE', au:358, incl:128.9, period:'~6,800 years', blurb:'The brightest comet visible from the Northern Hemisphere in a generation when it appeared in 2020, discovered by NASA\u2019s NEOWISE space telescope.' },
+];
+
+const BELT_DEFS = [
+  { id:'asteroid-belt', name:'Asteroid Belt', auInner:2.1, auOuter:3.3, inclMax:20, count:110, color:'#7d8398', blurb:'A ring of rocky debris between Mars and Jupiter — leftover material that never formed a planet. Contains millions of objects, but is mostly empty space.' },
+  { id:'kuiper-belt', name:'Kuiper Belt', auInner:30, auOuter:50, inclMax:30, count:90, color:'#6f89a3', blurb:'A disc of icy bodies beyond Neptune, home to Pluto and countless comets. It\u2019s the source of many short-period comets, and thicker/more scattered in tilt than the asteroid belt.' },
+];
+const OORT_DEF = { auInner: 2000, auOuter: 100000, count: 260, color:'#7a83a0' };
+
+const STARS = [
+  { id:'proxima', name:'Proxima Centauri', ly:4.24, radiusKm:107000, blurb:'The closest known star to the Sun — a small, dim red dwarf with at least one orbiting planet, Proxima b.' },
+  { id:'alpha-cen-a', name:'Alpha Centauri A', ly:4.37, radiusKm:851000, blurb:'The larger member of the nearest Sun-like star system, very similar in size and temperature to our own Sun.' },
+  { id:'alpha-cen-b', name:'Alpha Centauri B', ly:4.37, radiusKm:601000, blurb:'The smaller, orange-hued companion star orbiting Alpha Centauri A.' },
+  { id:'barnards-star', name:'Barnard\u2019s Star', ly:5.96, radiusKm:134000, blurb:'A faint red dwarf with the fastest known apparent motion across our sky of any star.' },
+  { id:'wolf359', name:'Wolf 359', ly:7.86, radiusKm:81000, blurb:'One of the smallest and faintest stars known, a favorite backdrop in science fiction for its proximity.' },
+  { id:'sirius-a', name:'Sirius A', ly:8.6, radiusKm:1190000, blurb:'The brightest star in Earth\u2019s night sky — about twice the Sun\u2019s mass and 25 times its luminosity.' },
+  { id:'sirius-b', name:'Sirius B', ly:8.6, radiusKm:5800, blurb:'A white dwarf companion to Sirius A — the collapsed core of a once much larger star, now Earth-sized but as dense as the Sun.' },
+  { id:'epsilon-eridani', name:'Epsilon Eridani', ly:10.5, radiusKm:600000, blurb:'A young, Sun-like star with its own asteroid belts and at least one giant planet — a system still taking shape.' },
+  { id:'tau-ceti', name:'Tau Ceti', ly:11.9, radiusKm:552000, blurb:'A Sun-like star thought to host several planets, and a long-time target in the search for Earth-like worlds.' },
+  { id:'vega', name:'Vega', ly:25, radiusKm:1550000, blurb:'One of the brightest stars in the sky and the northern pole star around 12,000 BCE — surrounded by a disc of dust where planets may be forming.' },
+  { id:'polaris', name:'Polaris', ly:433, radiusKm:37000000, blurb:'The current North Star — not especially bright, but famous for sitting almost exactly above Earth\u2019s rotational axis.' },
+  { id:'betelgeuse', name:'Betelgeuse', ly:548, radiusKm:617000000, blurb:'A red supergiant nearing the end of its life, so enormous that if it replaced the Sun its surface would reach past Jupiter. It will one day explode as a supernova.' },
+  { id:'rigel', name:'Rigel', ly:860, radiusKm:54000000, blurb:'A blue supergiant, one of the most luminous stars visible to the naked eye — tens of thousands of times brighter than the Sun.' },
+  { id:'orion-nebula', name:'Orion Nebula', ly:1344, radiusKm:0, type:'nebula', blurb:'A vast stellar nursery visible to the naked eye as a fuzzy patch in Orion\u2019s sword — a region where new stars are actively being born.' },
+];
+
+/* ============================= SCALES ============================= */
+function sunDist(au){ return 46 + 150*Math.log(1 + au/0.15); }
+function invSunDist(px){
+  let lo=0, hi=2e6;
+  for(let i=0;i<50;i++){ const mid=(lo+hi)/2; (sunDist(mid) < px) ? lo=mid : hi=mid; }
+  return lo;
+}
+function starDist(ly){ return sunDist(ly/AU_TO_LY); }
+function moonOffset(au){ return 16 + 15*Math.log(1 + au/0.0003); }
+function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+function markerR(radiusKm, kind){
+  if(kind==='star-center') return 30;
+  if(kind==='nebula') return 9;
+  if(kind==='comet') return 3.4;
+  let base = Math.sqrt(radiusKm)/13;
+  if(kind==='star') return clamp(base*0.7, 5, 15);
+  if(kind==='moon') return clamp(base, 1.6, 7);
+  if(kind==='dwarf') return clamp(base, 2.4, 6);
+  if(kind==='asteroid') return clamp(base, 2, 5);
+  return clamp(base, 3.4, 23); // planet
+}
+function hash01(str){ let h=0; for(let i=0;i<str.length;i++){ h=(h*31+str.charCodeAt(i))>>>0; } return (h%1000)/1000; }
+
+// standard inclination placement: X along the line of nodes, Y/Z split by inclination
+function orbitXYZ(dist, angleRad, inclDeg){
+  const i = inclDeg*Math.PI/180;
+  const x = dist*Math.cos(angleRad);
+  const y = dist*Math.sin(angleRad)*Math.cos(i);
+  const z = dist*Math.sin(angleRad)*Math.sin(i);
+  return {x,y,z};
+}
+
+/* ============================= BUILD SCENE DATA (static 3D world coords) ============================= */
+const GOLDEN = 137.508;
+let angleSeed = 12;
+function nextAngle(){ angleSeed += GOLDEN; return angleSeed % 360; }
+
+const nodes = [];
+nodes.push({ id:'sun', name:'Sun', kind:'star-center', x:0,y:0,z:0, auFromSun:0, r:markerR(0,'star-center'), color:'#f2c14e',
+  blurb:'A G-type main-sequence star, about 4.6 billion years old, containing 99.8% of the Solar System\u2019s mass.',
+  facts:[['Type','G-type main-sequence star'],['Radius','696,000 km (109× Earth)'],['Age','~4.6 billion years']] });
+
+const byId = {};
+
+PLANETS.forEach(p=>{
+  const a = nextAngle()*Math.PI/180;
+  const d = sunDist(p.au);
+  const {x,y,z} = orbitXYZ(d,a,p.incl);
+  const node = { id:p.id, name:p.name, kind:'planet', x,y,z, auFromSun:p.au, r:markerR(p.radiusKm,'planet'), color:p.color, ring:p.ring,
+    blurb:p.blurb, facts:[['Distance from Sun', p.au+' AU'],['Diameter', (p.radiusKm*2).toLocaleString()+' km'],['Orbital period', p.period+' Earth years'],['Orbital tilt', p.incl+'°'],['Known moons', p.moons]] };
+  nodes.push(node); byId[p.id]=node;
+});
+
+DWARF_PLANETS.forEach(p=>{
+  const a = nextAngle()*Math.PI/180;
+  const d = sunDist(p.au);
+  const {x,y,z} = orbitXYZ(d,a,p.incl);
+  const node = { id:p.id, name:p.name, kind:'dwarf', x,y,z, auFromSun:p.au, r:markerR(p.radiusKm,'dwarf'), color:p.color,
+    blurb:p.blurb, facts:[['Distance from Sun', p.au+' AU'],['Diameter', (p.radiusKm*2).toLocaleString()+' km'],['Orbital period', p.period+' Earth years'],['Orbital tilt', p.incl+'°']] };
+  nodes.push(node); byId[p.id]=node;
+});
+
+const MOONS = {
+  earth: [ { id:'moon', name:'Moon', au:0.00257, radiusKm:1737, blurb:'The only place beyond Earth humans have set foot on. It\u2019s slowly drifting away from Earth, by about 3.8 cm per year.' } ],
+  mars: [
+    { id:'phobos', name:'Phobos', au:0.0000627, radiusKm:11, blurb:'Orbits so close and fast it rises and sets twice a day — and is slowly spiraling in toward Mars.' },
+    { id:'deimos', name:'Deimos', au:0.000157, radiusKm:6, blurb:'The smaller and outer of Mars\u2019s two small, irregularly shaped moons.' },
+  ],
+  jupiter: [
+    { id:'io', name:'Io', au:0.00282, radiusKm:1821, blurb:'The most volcanically active body in the Solar System, driven by tidal heating from Jupiter\u2019s gravity.' },
+    { id:'europa', name:'Europa', au:0.00449, radiusKm:1560, blurb:'Its icy shell likely hides a liquid water ocean — a leading candidate in the search for life beyond Earth.' },
+    { id:'ganymede', name:'Ganymede', au:0.00716, radiusKm:2634, blurb:'The largest moon in the Solar System — bigger than the planet Mercury.' },
+    { id:'callisto', name:'Callisto', au:0.01259, radiusKm:2410, blurb:'One of the most heavily cratered objects known, its surface largely unchanged for billions of years.' },
+  ],
+  saturn: [
+    { id:'titan', name:'Titan', au:0.00817, radiusKm:2575, blurb:'The only moon with a dense atmosphere, and with stable liquid — lakes and rivers of methane and ethane.' },
+    { id:'enceladus', name:'Enceladus', au:0.00159, radiusKm:252, blurb:'Geysers at its south pole spray water-ice into space from a subsurface ocean.' },
+    { id:'rhea', name:'Rhea', au:0.00352, radiusKm:764, blurb:'Saturn\u2019s second-largest moon, made mostly of water ice.' },
+    { id:'iapetus', name:'Iapetus', au:0.0238, radiusKm:735, blurb:'Strikingly two-toned — one hemisphere is bright, the other as dark as coal.' },
+    { id:'mimas', name:'Mimas', au:0.00124, radiusKm:198, blurb:'A giant crater gives it a startling resemblance to the Death Star.' },
+  ],
+  uranus: [
+    { id:'titania', name:'Titania', au:0.00292, radiusKm:789, blurb:'The largest moon of Uranus, named for the queen of the fairies in Shakespeare\u2019s A Midsummer Night\u2019s Dream.' },
+    { id:'oberon', name:'Oberon', au:0.0039, radiusKm:761, blurb:'The outermost of Uranus\u2019s major moons, heavily cratered and ancient.' },
+    { id:'miranda', name:'Miranda', au:0.000868, radiusKm:236, blurb:'Has some of the tallest known cliffs in the Solar System, up to 20 km high.' },
+    { id:'ariel', name:'Ariel', au:0.00128, radiusKm:579, blurb:'The brightest of Uranus\u2019s major moons, with a relatively young, lightly cratered surface.' },
+    { id:'umbriel', name:'Umbriel', au:0.00178, radiusKm:585, blurb:'The darkest of Uranus\u2019s large moons, reflecting only about 10% of sunlight.' },
+  ],
+  neptune: [ { id:'triton', name:'Triton', au:0.00237, radiusKm:1353, blurb:'Orbits backwards relative to Neptune\u2019s rotation — likely a captured dwarf planet from the Kuiper Belt. Has active nitrogen geysers.' } ],
+  pluto: [ { id:'charon', name:'Charon', au:0.000131, radiusKm:606, blurb:'Over half the size of Pluto itself — the pair orbit a point of gravity between them, more like a double dwarf-planet system.' } ],
+};
+Object.keys(MOONS).forEach(parentId=>{
+  const parent = byId[parentId];
+  MOONS[parentId].forEach(m=>{
+    const ma = hash01(m.id)*Math.PI*2;
+    const mIncl = 4 + hash01(m.id+'i')*18; // schematic small tilt for visual variety
+    const mo = moonOffset(m.au);
+    const off = orbitXYZ(mo, ma, mIncl);
+    const node = { id:m.id, name:m.name, kind:'moon', parent:parentId, x:parent.x+off.x, y:parent.y+off.y, z:parent.z+off.z, auFromSun:parent.auFromSun, r:markerR(m.radiusKm,'moon'), color:'#c7cee0',
+      blurb:m.blurb, facts:[['Orbits', parent.name],['Distance from '+parent.name, Math.round(m.au*AU_KM).toLocaleString()+' km'],['Diameter', (m.radiusKm*2).toLocaleString()+' km']] };
+    nodes.push(node); byId[m.id]=node;
+  });
+});
+
+ASTEROIDS.forEach(p=>{
+  const a = nextAngle()*Math.PI/180;
+  const d = sunDist(p.au);
+  const {x,y,z} = orbitXYZ(d,a,p.incl);
+  const node = { id:p.id, name:p.name, kind:'asteroid', x,y,z, auFromSun:p.au, r:markerR(p.radiusKm,'asteroid'), color:'#c2a878',
+    blurb:p.blurb, facts:[['Distance from Sun', p.au+' AU'],['Diameter', (p.radiusKm*2).toLocaleString()+' km'],['Orbital tilt', p.incl+'°']] };
+  nodes.push(node); byId[p.id]=node;
+});
+
+COMETS.forEach(p=>{
+  const a = nextAngle()*Math.PI/180;
+  const d = sunDist(p.au);
+  const {x,y,z} = orbitXYZ(d,a,p.incl);
+  const node = { id:p.id, name:p.name, kind:'comet', x,y,z, auFromSun:p.au, r:markerR(0,'comet'), color:'#bfe3e8', tailAngle:a,
+    blurb:p.blurb, facts:[['Average distance from Sun', p.au+' AU'],['Orbital period', p.period],['Orbital tilt', p.incl+'° '+(p.incl>90?'(retrograde)':'')]] };
+  nodes.push(node); byId[p.id]=node;
+});
+
+STARS.forEach(s=>{
+  const a = nextAngle()*Math.PI/180;
+  const d = starDist(s.ly);
+  const incl = 8 + hash01(s.id)*36; // illustrative scatter, not real 3D position
+  const {x,y,z} = orbitXYZ(d,a,incl);
+  const kind = s.type==='nebula' ? 'nebula' : 'star';
+  const node = { id:s.id, name:s.name, kind, x,y,z, auFromSun: s.ly/AU_TO_LY, r:markerR(s.radiusKm,kind), color: kind==='nebula' ? '#d98fb0' : '#fff3d0',
+    blurb:s.blurb, facts: kind==='nebula' ? [['Distance from Sun', s.ly+' light-years']] : [['Distance from Sun', s.ly+' light-years ('+Math.round(s.ly/AU_TO_LY).toLocaleString()+' AU)'],['Radius', s.radiusKm>=1000000 ? (s.radiusKm/696000).toFixed(1)+'× the Sun' : s.radiusKm.toLocaleString()+' km']] };
+  nodes.push(node); byId[s.id]=node;
+});
+
+// decorative, non-interactive scatter: belts + Oort cloud
+function buildBeltDots(def){
+  const pts=[];
+  for(let i=0;i<def.count;i++){
+    const au = def.auInner + Math.random()*(def.auOuter-def.auInner);
+    const a = Math.random()*Math.PI*2;
+    const incl = Math.random()*def.inclMax;
+    const {x,y,z} = orbitXYZ(sunDist(au), a, incl);
+    pts.push({x,y,z});
+  }
+  return pts;
+}
+function buildOortDots(def){
+  const pts=[];
+  for(let i=0;i<def.count;i++){
+    const t = Math.random();
+    const au = def.auInner*Math.pow(def.auOuter/def.auInner, t);
+    const az = Math.random()*Math.PI*2;
+    const polar = Math.acos(2*Math.random()-1);
+    const d = sunDist(au);
+    pts.push({ x: d*Math.sin(polar)*Math.cos(az), y: d*Math.sin(polar)*Math.sin(az), z: d*Math.cos(polar) });
+  }
+  return pts;
+}
+const beltDotsData = BELT_DEFS.flatMap(def=> buildBeltDots(def).map(p=>({...p, color:def.color})) );
+const oortDotsData = buildOortDots(OORT_DEF).map(p=>({...p, color:OORT_DEF.color}));
+
+/* ============================= RENDER: static elements ============================= */
+const svgNS = 'http://www.w3.org/2000/svg';
+function el(tag, attrs){ const e=document.createElementNS(svgNS,tag); for(const k in attrs) e.setAttribute(k, attrs[k]); return e; }
+
+const starfield = document.getElementById('starfield');
+for(let i=0;i<420;i++){
+  const x = (Math.random()-0.5)*14000, y = (Math.random()-0.5)*14000;
+  const r = Math.random()*1.1+0.2;
+  starfield.appendChild(el('circle',{cx:x,cy:y,r, fill:'#fff', opacity:(Math.random()*0.5+0.15).toFixed(2)}));
+}
+
+const orbitLayer = document.getElementById('orbits');
+const orbitRings = [];
+const ORBIT_SAMPLES = 72;
+[...PLANETS, ...DWARF_PLANETS].forEach(p=>{
+  const d = sunDist(p.au);
+  const samples = [];
+  for(let i=0;i<=ORBIT_SAMPLES;i++){
+    const ang = (i/ORBIT_SAMPLES)*Math.PI*2;
+    samples.push(orbitXYZ(d, ang, p.incl));
+  }
+  const poly = el('polyline',{class:'orbit', 'data-layer': DWARF_PLANETS.includes(p)?'dwarf':'planet', points:''});
+  orbitLayer.appendChild(poly);
+  orbitRings.push({ samples, el: poly });
+});
+
+const beltLayer = document.getElementById('beltDots');
+beltDotsData.forEach(d=>{ beltLayer.appendChild(el('circle',{r:1.3, fill:d.color, opacity:0.65})); });
+beltLayer.setAttribute('data-layer','belt');
+
+const oortLayer = document.getElementById('oortDots');
+oortDotsData.forEach(d=>{ oortLayer.appendChild(el('circle',{r:1.1, fill:d.color, opacity:0.5})); });
+oortLayer.setAttribute('data-layer','star');
+
+const objectLayer = document.getElementById('objects');
+nodes.forEach(n=>{
+  const layer = n.kind==='star-center' ? 'sun' : n.kind==='nebula' ? 'star' : n.kind;
+  const g = el('g',{class:'obj', 'data-id':n.id, 'data-layer': layer});
+  if(n.kind==='comet') g.appendChild(el('line',{class:'tail'}));
+  if(n.ring) g.appendChild(el('ellipse',{class:'satring', fill:'none', stroke:'#cbb686', 'stroke-width':1.4, opacity:0.65}));
+  g.appendChild(el('line',{class:'leader'}));
+  const marker = el('circle',{r:n.r, fill:n.color, class:'marker'});
+  if(n.kind==='nebula'){ marker.setAttribute('fill','none'); marker.setAttribute('stroke',n.color); marker.setAttribute('stroke-width',2); marker.setAttribute('opacity','0.8'); }
+  g.appendChild(marker);
+  const label = el('text',{class:'obj-label'+(n.kind==='star-center'?' type-star':'')});
+  label.textContent = n.name;
+  g.appendChild(label);
+  objectLayer.appendChild(g);
+  n.$g = g; n.$marker = marker; n.$label = label; n.$leader = g.querySelector('.leader');
+  n.$ring = g.querySelector('.satring'); n.$tail = g.querySelector('.tail');
+});
+
+/* ============================= 3D PROJECTION ============================= */
+const rot = { yaw: 0, pitch: 0 };
+const MAX_PITCH = 85*Math.PI/180;
+// The camera always orbits around a focus point — the Sun by default, or whatever body
+// was last selected. project() is a pure rotation (used for direction vectors, like the
+// gizmo's axes); projectFocused() is what actually places things in the scene.
+let focus = { x:0, y:0, z:0 };
+let focusId = 'sun', focusName = 'Sun';
+
+function project(x,y,z){
+  const cy=Math.cos(rot.yaw), sy=Math.sin(rot.yaw);
+  const x1 = x*cy - y*sy;
+  const y1 = x*sy + y*cy;
+  const cp=Math.cos(rot.pitch), sp=Math.sin(rot.pitch);
+  const y2 = y1*cp - z*sp;
+  const depth = y1*sp + z*cp;
+  return { px:x1, py:y2, depth };
+}
+function projectFocused(x,y,z){ return project(x-focus.x, y-focus.y, z-focus.z); }
+
+function updateProjection(){
+  let minD=Infinity, maxD=-Infinity;
+  nodes.forEach(n=>{
+    const pr = projectFocused(n.x,n.y,n.z);
+    n.px=pr.px; n.py=pr.py; n.depth=pr.depth;
+    if(n.kind!=='star' && n.kind!=='nebula'){ if(pr.depth<minD) minD=pr.depth; if(pr.depth>maxD) maxD=pr.depth; }
+  });
+  const span = Math.max(1, maxD-minD);
+
+  // depth sort real nodes for correct visual overlap
+  const sorted = nodes.slice().sort((a,b)=> b.depth - a.depth);
+  sorted.forEach(n=> objectLayer.appendChild(n.$g));
+
+  nodes.forEach(n=>{
+    positionNode(n, span, minD);
+  });
+
+  // decorative dots: just reproject cx/cy, cheap
+  reprojectDust(beltLayer.children, beltDotsData);
+  reprojectDust(oortLayer.children, oortDotsData);
+
+  // orbital paths must tilt in sync with the bodies that travel them
+  orbitRings.forEach(ring=>{
+    let pts = '';
+    for(let i=0;i<ring.samples.length;i++){
+      const s = ring.samples[i];
+      const pr = projectFocused(s.x, s.y, s.z);
+      pts += pr.px.toFixed(1)+','+pr.py.toFixed(1)+' ';
+    }
+    ring.el.setAttribute('points', pts);
+  });
+  updateGizmo();
+}
+function reprojectDust(elems, data){
+  for(let i=0;i<data.length;i++){
+    const pr = project(data[i].x, data[i].y, data[i].z);
+    elems[i].setAttribute('cx', pr.px.toFixed(1));
+    elems[i].setAttribute('cy', pr.py.toFixed(1));
+  }
+}
+
+function positionNode(n, span, minD){
+  const px=n.px, py=n.py;
+  n.$marker.setAttribute('cx', px); n.$marker.setAttribute('cy', py);
+  if(n.kind!=='star' && n.kind!=='nebula' && n.kind!=='star-center'){
+    const t = clamp((n.depth-minD)/span, 0, 1); // 0 = nearest, 1 = farthest
+    n.$marker.setAttribute('opacity', (1 - 0.32*t).toFixed(2));
+  } else {
+    n.$marker.removeAttribute('opacity');
+  }
+
+  let originX=0, originY=0;
+  if(n.kind==='moon'){ const parent=byId[n.parent]; originX=parent.px; originY=parent.py; }
+  const dx = px-originX, dy = py-originY;
+  const distFromOrigin = Math.hypot(dx,dy) || 1;
+  const dirx = dx/distFromOrigin, diry = dy/distFromOrigin;
+
+  const labelDist = n.r + (n.kind==='moon' ? 10 : 16);
+  const lx = px + dirx*labelDist, ly = py + diry*labelDist;
+  const rightSide = dirx >= 0;
+
+  if(n.kind!=='star-center'){
+    n.$leader.setAttribute('x1', px+dirx*n.r); n.$leader.setAttribute('y1', py+diry*n.r);
+    n.$leader.setAttribute('x2', lx); n.$leader.setAttribute('y2', ly);
+    n.$leader.style.display='';
+  } else { n.$leader.style.display='none'; }
+
+  n.$label.setAttribute('x', lx + (rightSide?5:-5));
+  n.$label.setAttribute('y', ly);
+  n.$label.setAttribute('text-anchor', rightSide?'start':'end');
+  n.$label.setAttribute('dominant-baseline','middle');
+
+  if(n.$ring){ n.$ring.setAttribute('cx',px); n.$ring.setAttribute('cy',py); n.$ring.setAttribute('rx',n.r*2.1); n.$ring.setAttribute('ry',n.r*0.7); }
+  if(n.$tail){
+    n.$tail.setAttribute('x1', px); n.$tail.setAttribute('y1', py);
+    n.$tail.setAttribute('x2', px+dirx*n.r*7); n.$tail.setAttribute('y2', py+diry*n.r*7);
+    n.$tail.setAttribute('stroke', '#bfe3e8'); n.$tail.setAttribute('stroke-width', 1.6); n.$tail.setAttribute('opacity', 0.4);
+  }
+}
+
+/* ============================= VIEW: pan/zoom (applied on top of projected scene) ============================= */
+const stage = document.getElementById('stage');
+const world = document.getElementById('world');
+let view = { x:0, y:0, scale:1 };
+const MIN_SCALE = 0.05, MAX_SCALE = 26;
+let vw=1000, vh=1000;
+
+function resize(){ vw = window.innerWidth; vh = window.innerHeight; stage.setAttribute('viewBox', `0 0 ${vw} ${vh}`); applyView(); }
+function applyView(){
+  const cx = vw/2, cy = vh/2;
+  world.setAttribute('transform', `translate(${cx + view.x} ${cy + view.y}) scale(${view.scale})`);
+  updateLabelScale();
+  updateScaleReadout();
+  updateLOD();
+}
+function updateLabelScale(){
+  const inv = clamp(1/Math.pow(view.scale,0.55), 0.28, 3.4);
+  nodes.forEach(n=>{
+    n.$label.setAttribute('font-size', (12*inv).toFixed(2));
+    n.$leader.setAttribute('stroke-width', (1*inv).toFixed(2));
+    n.$marker.setAttribute('stroke-width', n.$marker.classList.contains('selected') ? (2*inv).toFixed(2) : 0);
+  });
+}
+function updateScaleReadout(){
+  const label = document.getElementById('scaleLabel');
+  let auAtCenter, suffix;
+  if(focusId === 'sun'){
+    // free-pan case: invert the log scale from the actual world point under the view center
+    const wx = -view.x/view.scale, wy = -view.y/view.scale;
+    auAtCenter = invSunDist(Math.hypot(wx,wy));
+    suffix = ' — scale near view center';
+  } else {
+    // focused on a body: the log scale isn't Sun-centered anymore in screen space, so
+    // approximate using that body's own real distance from the Sun (accurate right at
+    // the focus, which is where the view is centered by default after selecting it)
+    auAtCenter = focus.auFromSun || 0;
+    suffix = ' — scale near '+focusName;
+  }
+  const auPerScreenPx = (auAtCenter + 0.15) / (150 * view.scale);
+  const auSpan = auPerScreenPx * 120; // bar is ~120px wide
+  let txt;
+  if(auSpan < 1) txt = auSpan.toFixed(2)+' AU';
+  else if(auSpan < 1000) txt = Math.round(auSpan)+' AU';
+  else txt = (auSpan*AU_TO_LY).toFixed(auSpan*AU_TO_LY<10?1:0)+' light-years';
+  label.textContent = '≈ '+txt+suffix;
+}
+
+/* ---- Level of detail: auto-thin as you zoom out ---- */
+const MOON_HIDE_BELOW = 1.4;
+const PLANET_HIDE_BELOW = 0.18;
+const OORT_SHOW_BELOW = 0.35;
+const layerState = { planet:true, dwarf:true, moon:true, asteroid:true, comet:true, belt:true, star:false };
+function lodOk(layer){
+  if(layer==='moon') return view.scale >= MOON_HIDE_BELOW;
+  if(layer==='planet' || layer==='dwarf' || layer==='comet' || layer==='asteroid' || layer==='belt') return view.scale >= PLANET_HIDE_BELOW;
+  return true;
+}
+function updateLOD(){
+  world.querySelectorAll('[data-layer]').forEach(elx=>{
+    const layer = elx.dataset.layer;
+    if(layer==='sun'){ elx.style.opacity=''; elx.style.pointerEvents=''; return; }
+    const userOn = layerState[layer];
+    const on = userOn && lodOk(layer);
+    elx.style.opacity = on ? '' : '0';
+    elx.style.pointerEvents = on ? '' : 'none';
+  });
+  // Oort cloud rides with the star layer but only once zoomed out near interstellar range
+  const oortOn = layerState.star && view.scale < OORT_SHOW_BELOW;
+  oortLayer.style.opacity = oortOn ? '0.9' : '0';
+  oortLayer.style.pointerEvents = 'none';
+  document.querySelectorAll('.lg-item').forEach(li=>{ li.classList.toggle('on', layerState[li.dataset.layer]); });
+}
+document.querySelectorAll('.lg-item').forEach(li=>{
+  li.addEventListener('click', ()=>{ layerState[li.dataset.layer] = !layerState[li.dataset.layer]; updateLOD(); });
+});
+
+const layersBtn = document.getElementById('layersBtn');
+const layersMenu = document.getElementById('layersMenu');
+layersBtn.addEventListener('click', e=>{
+  e.stopPropagation();
+  const open = layersMenu.style.display==='block';
+  layersMenu.style.display = open ? 'none' : 'block';
+  layersBtn.classList.toggle('open', !open);
+  searchResults.style.display='none';
+});
+
+
+/* ============================= INTERACTION: drag = pan, wheel/pinch = zoom ============================= */
+let dragging=false, dragStart=null, moved=false;
+stage.addEventListener('pointerdown', e=>{
+  dragging=true; moved=false; stage.classList.add('dragging');
+  dragStart = { x:e.clientX, y:e.clientY, vx:view.x, vy:view.y };
+  stage.setPointerCapture(e.pointerId);
+});
+stage.addEventListener('pointermove', e=>{
+  if(!dragging) return;
+  const dx = e.clientX-dragStart.x, dy = e.clientY-dragStart.y;
+  if(Math.abs(dx)+Math.abs(dy) > 3) moved = true;
+  view.x = dragStart.vx + dx; view.y = dragStart.vy + dy;
+  applyView();
+});
+stage.addEventListener('pointerup', e=>{ dragging=false; stage.classList.remove('dragging'); if(!moved) handleTap(e); });
+stage.addEventListener('pointercancel', ()=>{ dragging=false; stage.classList.remove('dragging'); });
+
+stage.addEventListener('wheel', e=>{
+  e.preventDefault();
+  const rect = stage.getBoundingClientRect();
+  zoomAt(e.clientX-rect.left, e.clientY-rect.top, e.deltaY<0 ? 1.16 : 1/1.16);
+}, { passive:false });
+
+function zoomAt(px, py, factor){
+  const cx = vw/2, cy = vh/2;
+  const wx = (px - cx - view.x)/view.scale, wy = (py - cy - view.y)/view.scale;
+  const newScale = clamp(view.scale*factor, MIN_SCALE, MAX_SCALE);
+  view.x = px - cx - wx*newScale; view.y = py - cy - wy*newScale; view.scale = newScale;
+  applyView();
+}
+// Two-finger gesture: pinch distance = zoom, twist = rotate (yaw), vertical drag = tilt (pitch).
+// One finger already pans, so two fingers never pan — that ambiguity is what caused the old jump:
+// zoom was anchored to the pinch's *starting* midpoint instead of tracking it live, so as your
+// fingers naturally drifted the map re-centered under them each frame. Now everything is computed
+// as a small incremental step from the previous frame, anchored at the current midpoint.
+let twoTouch = null;
+function touchPt(t){ return { x:t.clientX, y:t.clientY }; }
+function twoTouchSnapshot(e){ return { p0: touchPt(e.touches[0]), p1: touchPt(e.touches[1]) }; }
+
+stage.addEventListener('touchstart', e=>{
+  twoTouch = e.touches.length===2 ? twoTouchSnapshot(e) : null;
+}, {passive:true});
+
+stage.addEventListener('touchmove', e=>{
+  if(e.touches.length!==2 || !twoTouch) return;
+  e.preventDefault();
+  const cur = twoTouchSnapshot(e);
+  const prevMid = { x:(twoTouch.p0.x+twoTouch.p1.x)/2, y:(twoTouch.p0.y+twoTouch.p1.y)/2 };
+  const curMid  = { x:(cur.p0.x+cur.p1.x)/2, y:(cur.p0.y+cur.p1.y)/2 };
+  const prevDist = Math.hypot(twoTouch.p0.x-twoTouch.p1.x, twoTouch.p0.y-twoTouch.p1.y);
+  const curDist  = Math.hypot(cur.p0.x-cur.p1.x, cur.p0.y-cur.p1.y);
+  const prevAngle = Math.atan2(twoTouch.p1.y-twoTouch.p0.y, twoTouch.p1.x-twoTouch.p0.x);
+  const curAngle  = Math.atan2(cur.p1.y-cur.p0.y, cur.p1.x-cur.p0.x);
+
+  if(prevDist > 8 && curDist > 8){
+    const rect = stage.getBoundingClientRect();
+    zoomAt(curMid.x-rect.left, curMid.y-rect.top, curDist/prevDist);
+  }
+
+  let dAngle = curAngle - prevAngle;
+  if(dAngle > Math.PI) dAngle -= 2*Math.PI;
+  if(dAngle < -Math.PI) dAngle += 2*Math.PI;
+  rot.yaw += dAngle;
+  rot.pitch = clamp(rot.pitch + (curMid.y-prevMid.y)*0.006, -MAX_PITCH, MAX_PITCH);
+  updateGizmo();
+  updateProjection();
+
+  twoTouch = cur;
+}, {passive:false});
+stage.addEventListener('touchend', e=>{ twoTouch = e.touches.length===2 ? twoTouchSnapshot(e) : null; });
+stage.addEventListener('touchcancel', ()=>{ twoTouch = null; });
+
+document.getElementById('zoomIn').onclick = ()=> zoomAt(vw/2, vh/2, 1.4);
+document.getElementById('zoomOut').onclick = ()=> zoomAt(vw/2, vh/2, 1/1.4);
+document.getElementById('resetBtn').onclick = ()=> {
+  view = {x:0,y:0,scale:1}; rot.yaw=0; rot.pitch=0;
+  focus = {x:0,y:0,z:0,auFromSun:0}; focusId='sun'; focusName='Sun';
+  document.querySelectorAll('.marker.selected').forEach(m=>m.classList.remove('selected'));
+  updateGizmo(); updateProjection(); applyView();
+};
+window.addEventListener('resize', resize);
+
+/* ---- Rotate pad: a live 3D gizmo, not just an indicator dot ---- */
+const rotatePad = document.getElementById('rotatePad');
+const gizPlane = document.getElementById('gizPlane');
+const gizAxis = document.getElementById('gizAxis');
+const gizNorth = document.getElementById('gizNorth');
+const gizNorthLbl = document.getElementById('gizNorthLbl');
+const gizRef = document.getElementById('gizRef');
+const GIZ_R = 22, GIZ_C = 32;
+let rotDragging=false, rotStart=null, rafPending=false;
+
+// Uses the same project() as the main scene, so the gizmo always matches the real camera exactly.
+// The ellipse is the ecliptic plane edge-on-to-face-on as you tilt (a circle overhead, a line edge-on).
+// The gold pin is the north pole of that plane — it collapses to the center when looking straight
+// down, and swings out as you tilt. The blue dot marks a fixed reference direction on the plane,
+// so you can see yaw (spin) even when the ellipse itself looks unchanged.
+function updateGizmo(){
+  const ry = Math.max(1.5, GIZ_R*Math.abs(Math.cos(rot.pitch)));
+  gizPlane.setAttribute('ry', ry.toFixed(1));
+
+  const north = project(0,0,GIZ_R), south = project(0,0,-GIZ_R);
+  const nx = GIZ_C+north.px, ny = GIZ_C+north.py;
+  gizAxis.setAttribute('x1', (GIZ_C+south.px).toFixed(1)); gizAxis.setAttribute('y1', (GIZ_C+south.py).toFixed(1));
+  gizAxis.setAttribute('x2', nx.toFixed(1)); gizAxis.setAttribute('y2', ny.toFixed(1));
+  gizNorth.setAttribute('cx', nx.toFixed(1)); gizNorth.setAttribute('cy', ny.toFixed(1));
+  gizNorthLbl.setAttribute('x', nx.toFixed(1)); gizNorthLbl.setAttribute('y', (ny-6).toFixed(1));
+
+  const ref = project(GIZ_R,0,0);
+  gizRef.setAttribute('cx', (GIZ_C+ref.px).toFixed(1));
+  gizRef.setAttribute('cy', (GIZ_C+ref.py).toFixed(1));
+}
+rotatePad.addEventListener('pointerdown', e=>{ rotDragging=true; rotStart={x:e.clientX,y:e.clientY,yaw:rot.yaw,pitch:rot.pitch}; rotatePad.setPointerCapture(e.pointerId); rotatePad.style.cursor='grabbing'; });
+rotatePad.addEventListener('pointermove', e=>{
+  if(!rotDragging) return;
+  const dx = e.clientX-rotStart.x, dy = e.clientY-rotStart.y;
+  rot.yaw = rotStart.yaw + dx*0.012;
+  rot.pitch = clamp(rotStart.pitch + dy*0.012, -MAX_PITCH, MAX_PITCH);
+  updateGizmo();
+  if(!rafPending){ rafPending=true; requestAnimationFrame(()=>{ updateProjection(); rafPending=false; }); }
+});
+window.addEventListener('pointerup', ()=>{ if(rotDragging){ rotDragging=false; rotatePad.style.cursor='grab'; } });
+
+/* ============================= SELECT / INFO PANEL ============================= */
+function handleTap(e){ const g = e.target.closest('.obj'); if(g) selectNode(g.dataset.id); }
+
+function selectNode(id){
+  const n = byId[id];
+  if(!n) return;
+  document.querySelectorAll('.marker.selected').forEach(m=>m.classList.remove('selected'));
+  n.$marker.classList.add('selected');
+
+  const body = document.getElementById('infoBody');
+  const kindLabel = {planet:'Planet','star-center':'Star', dwarf:'Dwarf planet', moon:'Moon of '+ (n.facts.find(f=>f[0]==='Orbits')||[,''])[1], star:'Star', nebula:'Nebula', comet:'Comet', asteroid:'Asteroid'}[n.kind] || '';
+  body.innerHTML = `<h2>${n.name}</h2><div class="kind">${kindLabel}</div>
+    <table>${n.facts.map(f=>`<tr><td>${f[0]}</td><td>${f[1]}</td></tr>`).join('')}</table>
+    <div class="blurb">${n.blurb}</div>`;
+  document.getElementById('infoPanel').classList.add('open');
+
+  // this body becomes the pivot for rotation and the anchor for zoom
+  focus = { x:n.x, y:n.y, z:n.z, auFromSun: n.auFromSun };
+  focusId = n.id; focusName = n.name;
+  updateProjection(); // recompute everyone's position relative to the new focus first...
+  const targetScale = clamp(Math.max(view.scale, 2.2), MIN_SCALE, MAX_SCALE);
+  view.scale = targetScale; view.x = 0; view.y = 0; // ...then the focus body sits exactly at center
+  applyView();
+}
+document.getElementById('infoClose').onclick = ()=>{
+  document.getElementById('infoPanel').classList.remove('open');
+  document.querySelectorAll('.marker.selected').forEach(m=>m.classList.remove('selected'));
+};
+
+/* ============================= SEARCH ============================= */
+const searchInput = document.getElementById('search');
+const searchResults = document.getElementById('searchResults');
+searchInput.addEventListener('input', ()=>{
+  const q = searchInput.value.trim().toLowerCase();
+  if(!q){ searchResults.style.display='none'; return; }
+  const matches = nodes.filter(n=>n.name.toLowerCase().includes(q)).slice(0,8);
+  if(!matches.length){ searchResults.style.display='none'; return; }
+  searchResults.innerHTML = matches.map(m=>`<div data-id="${m.id}">${m.name}<span>${m.kind.replace('-',' ')}</span></div>`).join('');
+  searchResults.style.display='block';
+});
+searchResults.addEventListener('pointerdown', e=>{
+  const d = e.target.closest('div[data-id]'); if(!d) return;
+  selectNode(d.dataset.id); searchResults.style.display='none'; searchInput.value='';
+});
+document.addEventListener('pointerdown', e=>{
+  if(!e.target.closest('.searchRow')) searchResults.style.display='none';
+  if(!e.target.closest('.layersRow')){ layersMenu.style.display='none'; layersBtn.classList.remove('open'); }
+});
+
+/* ============================= ABOUT PANEL ============================= */
+const aboutBtn = document.getElementById('aboutBtn');
+const aboutPanel = document.getElementById('aboutPanel');
+aboutBtn.onclick = ()=>{ aboutPanel.style.display = aboutPanel.style.display==='block' ? 'none' : 'block'; };
+document.getElementById('aboutClose').onclick = ()=> aboutPanel.style.display='none';
+
+/* ============================= INIT ============================= */
+updateProjection();
+resize();
+</script>
+</body>
+</html>
